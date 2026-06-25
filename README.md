@@ -24,6 +24,7 @@ podman run -d --name arma3 --restart always \
     -v ./presets:/arma3/server/presets \
     -v ./mods:/arma3/server/mods \
     -v ./servermods:/arma3/server/servermods \
+    -v ./mpmissions:/arma3/server/mpmissions \
     -v ./server:/arma3/server \
     -v $HOME/.local/share/Steam/config:/arma3/Steam/config \
     --env-file .env \
@@ -34,6 +35,10 @@ And you're done. The image updates itself every re-start.
 Stopping: `podman stop arma3`  
 (re)Starting: `podman start arma3`  
 Log inspection: `podman logs arma3`
+
+NOTE: The above commands assume a fully local, default-location
+      Steam installation. The config folder will likely be located
+      elsewhere is installed via Flatpak
 
 ## Volumes
 
@@ -65,19 +70,6 @@ mirrored to `/arma3/server/configs` inside the container.
 * `/arma3/server/` -- the server install, workshop cache, keys. Auxiliary.
 * `/arma3/Steam/config` -- mounted directly from your host. Handles Steam login persistence.
 
-
-## Workshop mods
-
-1. Export a preset from the Arma 3 Launcher (the `.html` file).
-2. Drop it in `presets/`.
-3. In `.env`: `MODS_PRESET=thatfile.html`
-
-The container downloads them every start. All files must be **lowercase** with underscores instead of spaces. The entrypoint handles this automatically.
-
-If your preset is hosted online: `MODS_PRESET=https://example.com/modlist.html`
-
-Local mods (not on the Workshop) go in `mods/` or `servermods/`.
-
 ## Steam Guard
 
 The first time the container runs, Steam asks for a verification code. Do this once on the host:
@@ -88,25 +80,24 @@ steamcmd +login YOUR_USERNAME
 podman restart arma3
 ```
 
-The login session is persisted in `~/.local/share/Steam/config` — already mounted into the container. After one login it won't ask again.
+This lets `steamcmd` create a persistent login session in `~/.local/share/Steam/config`.
+Subsequent correct logins with `STEAM_USERNAME` and `STEAM_PASSWORD` will not ask for a
+Steam Guard code again.
 
 ## Settings
 
-Everything goes in `.env`. Common ones:
+Reference `.env.example` for a full list of settings available
+through this image.
 
-| Variable | Default | What it does |
-|----------|---------|--------------|
-| `PORT` | `2302` | Game port (also uses +1 through +4) |
-| `ARMA_LIMITFPS` | `50` | Server FPS cap |
-| `ARMA_WORLD` | `empty` | World to load |
-| `ARMA_CONFIG` | `main.cfg` | Config filename inside `configs/` |
-| `STEAM_BRANCH` | `public` | Branch. Set to `creatordlc` for CDLCs |
-| `ARMA_CDLC` | | CDLC codes, semicolons. e.g. `ws;gm` |
-| `MODS_LOCAL` | `true` | Load mods from `mods/` and `servermods/` |
-| `HEADLESS_CLIENTS` | `0` | Number of headless clients |
-| `SKIP_INSTALL` | `false` | Skip the auto-update on restart |
+## Workshop mods
 
-Full list: `.env.example`.
+You can use an exported `.html` preset by dropping it into the
+mounted `presets` folder (`./presets` by default) and setting
+`MODS_PRESET=path_to_modpack.html` in `.env`.
+
+Otherwise, http(s) links are also supported: `MODS_PRESET=https://example.com/path_to_modpack.html`
+
+Local mods (not on the Workshop) go in `mods/` for client-side and `servermods/` for server-side.
 
 ## Creator DLC
 
