@@ -1,115 +1,157 @@
 # Arma 3 Dedicated Server
 
-An Arma 3 Dedicated Server. Updates to the latest version every time it is restarted.
+An Arma 3 Dedicated Server. Updates to the latest version on every restart.
+
+Uses **steamcmd** to download and update the server and workshop mods.
 
 ## Usage
 
+### docker-compose (recommended)
+
+1. Copy the `.env.example` file to `.env` and fill in your `STEAM_USER` and `STEAM_PASSWORD`.
+2. Place your missions in `./mpmissions/`, configs in `./configs/`, and mods in `./mods/` and `./servermods/`.
+3. Run: `docker compose up -d`
+
 ### Docker CLI
 
-```s
-    docker create \
-        --name=arma-server \
-        -p 2302:2302/udp \
-        -p 2303:2303/udp \
-        -p 2304:2304/udp \
-        -p 2305:2305/udp \
-        -p 2306:2306/udp \
-        -v path/to/missions:/arma3/server/mpmissions \
-        -v path/to/configs:/arma3/server/configs \
-        -v path/to/mods:/arma3/server/mods \
-        -v path/to/servermods:/arma3/server/servermods \
-        -e STEAM_USER=myusername \
-        -e STEAM_PASSWORD=mypassword \
-        ghcr.io/brettmayson/arma3server/arma3server:v2
+```sh
+docker create \
+    --name=arma-server \
+    -p 2302:2302/udp \
+    -p 2303:2303/udp \
+    -p 2304:2304/udp \
+    -p 2305:2305/udp \
+    -p 2306:2306/udp \
+    -v ./configs:/arma3/server/configs \
+    -v ./mods:/arma3/server/mods \
+    -v ./servermods:/arma3/server/servermods \
+    -v ./server:/arma3/server \
+    -e STEAM_USER=myusername \
+    -e STEAM_PASSWORD=mypassword \
+    ghcr.io/brettmayson/arma3server/arma3server:v3
 ```
 
-### docker-compose
+## Commands
 
-Use the docker-compose.yml file inside a folder. It will automatically create 4 folders in which the missions, configs, mods and servermods can be loaded.
+The container supports three entrypoint commands:
 
-Copy the `.env.example` file to `.env`, containing at least `STEAM_USER` and `STEAM_PASSWORD`.
+| Command            | Behaviour                                                    |
+| ------------------ | ------------------------------------------------------------ |
+| *(default)*        | Update & validate the server, then start it.                 |
+| `update`           | Only update the server and mods. Does not start.             |
+| `update_validate`  | Update & validate server files. Does not start.              |
+| `start`            | Only start the server. No update.                            |
 
-Use `docker-compose start` to start the server.
+## Environment Variables
 
-Use `docker-compose logs` to see server logs.
+### Steam credentials (required for update)
 
-Use `docker-compose down` to shutdown the server.
+| Variable               | Default    | Description                              |
+| ---------------------- | ---------- | ---------------------------------------- |
+| `STEAM_USER`           | (required) | Steam account username.                  |
+| `STEAM_PASSWORD`       | (required) | Steam account password.                  |
+| `STEAM_BRANCH`         | `public`   | Steam beta branch to use.                |
+| `STEAM_BRANCH_PASSWORD`|            | Password for the beta branch.            |
 
-The `network_mode: host` can be changed to explicit ports if needed.
+The Steam account does **not** need to own Arma 3, but must have Steam Guard disabled.
 
-Use `docker-compose up -d` to start the server, detached.
+### Server settings
 
-See [Docker-compose](https://docs.docker.com/compose/install/#install-compose) for an installation guide.
+| Variable               | Default              | Description                                    |
+| ---------------------- | -------------------- | ---------------------------------------------- |
+| `ARMA_BINARY`          | `./arma3server_x64`  | Server binary to launch.                       |
+| `ARMA_CONFIG`          | `main.cfg`           | Server config file (from `configs/` dir).      |
+| `ARMA_BASIC_CONFIG`    | `basic.cfg`          | Basic network config file (from `configs/` dir). |
+| `ARMA_PROFILE`         | `main`               | Profile name (stored in `configs/profiles`).   |
+| `ARMA_WORLD`           | `empty`              | World to load on startup.                      |
+| `ARMA_LIMITFPS`        | `50`                 | Maximum server FPS (5-1000).                   |
+| `ARMA_PARAMS`          |                      | Additional Arma CLI parameters.                |
+| `ARMA_CDLC`            |                      | CDLCs to load, semicolon-separated (e.g. `csla;gm`). |
+| `PORT`                 | `2302`               | Game port.                                     |
+| `SKIP_INSTALL`         | `false`              | Set to `true` to skip server update on start.  |
 
-Profiles are saved in `/arma3/server/configs/profiles`
+### Mods
 
-## Parameters
+| Variable               | Default              | Description                                    |
+| ---------------------- | -------------------- | ---------------------------------------------- |
+| `MODS_LOCAL`           | `true`               | Load mods from `mods/` and `servermods/` dirs. |
+| `MODS_PRESET`          |                      | Path or URL to an Arma 3 Launcher HTML preset. |
+| `MANAGED_MODS`         |                      | Space-separated workshop mod IDs to auto-download. |
+| `EXTRACT_MOD_KEYS`     | `false`              | Copy `*.bikey` files from mods to `keys/`.     |
+| `CLEAR_KEYS`           | `true`               | Clear `keys/` directory before every start.    |
 
-| Parameter                     | Function                                                  | Default |
-| -------------                 |--------------                                             | - |
-| `-p 2302-2306`                | Ports required by Arma 3 |
-| `-v /arma3/server/mpmission`         | Folder with MP Missions |
-| `-v /arma3/server/configs`           | Folder containing config files |
-| `-v /arma3/server/mods`              | Mods that will be loaded by clients |
-| `-v /arma3/server/servermods`        | Mods that will only be loaded by the server |
-| `-v /arma3/server`        | Folder containing the server files |
-| `-e PORT`                     | Port used by the server, (uses PORT to PORT+3)            | 2302 |
-| `-e ARMA_BINARY`              | Arma 3 server binary to use   | `./arma3server` |
-| `-e ARMA_CONFIG`              | Config file to load from `/arma3/server/configs`                 | `main.cfg` |
-| `-e ARMA_PARAMS`              | Additional Arma CLI parameters |
-| `-e ARMA_PROFILE`             | Profile name, stored in `/arma3/server/configs/profiles`         | `main` |
-| `-e ARMA_WORLD`               | World to load on startup                                  | `empty` |
-| `-e ARMA_LIMITFPS`            | Maximum FPS | `1000` |
-| `-e ARMA_CDLC`                | cDLCs to load, separated by semicolons                    | - |
-| `-e STEAM_USER`               | Steam username used to login to steamcmd |
-| `-e STEAM_PASSWORD`           | Steam password |
-| `-e HEADLESS_CLIENTS`         | Launch n number of headless clients                       | `0` |
-| `-e HEADLESS_CLIENTS_PROFILE` | Headless client profile name (supports placeholders)      | `$profile-hc-$i` |
-| `-e MODS_LOCAL`               | Should the mods folder be loaded | `true` |
-| `-e MODS_PRESET`              | An Arma 3 Launcher preset to load |
-| `-e SKIP_INSTALL`             | Skip Arma 3 installation | `false` |
-| `-e CLEAR_KEYS`               | Clear the keys directory every launch (keys will still be copied from mods) | `true` |
+### Headless clients
 
-The Steam account does not need to own Arma 3, but must have Steam Guard disabled.
+| Variable                   | Default            | Description                                 |
+| -------------------------- | ------------------ | ------------------------------------------- |
+| `HEADLESS_CLIENTS`         | `0`                | Number of headless clients to launch.       |
+| `HEADLESS_CLIENTS_PROFILE` | `$profile-hc-$i`   | Profile name pattern. Supports `$profile`, `$i`, `$ii`. |
 
-List of Steam branches can be found on the Community Wiki, [Arma 3: Steam Branches](https://community.bistudio.com/wiki/Arma_3:_Steam_Branches)
+## Mods
+
+### Local mods
+
+Place mod folders in `./mods/` (client-side) and `./servermods/` (server-side only).
+Mod folders and all their files **must be lowercase** and spaces replaced with underscores.
+
+### Workshop mods (MODS_PRESET)
+
+Export an HTML preset from the Arma 3 Launcher and reference it:
+
+```sh
+-e MODS_PRESET="my_mods.html"
+-e MODS_PRESET="https://example.com/my_mods.html"
+```
+
+### MANAGED_MODS
+
+For simpler setups, provide a space-separated list of workshop IDs:
+
+```sh
+-e MANAGED_MODS="463939057 450814997"
+```
+
+These mods are automatically downloaded via steamcmd and loaded.
 
 ## Creator DLC
 
-To use a Creator DLC the `STEAM_BRANCH` must be set to `creatordlc`
+Set `STEAM_BRANCH` to `creatordlc` and list CDLC codes in `ARMA_CDLC`:
 
-| Name | Flag |
-| ---- | ---- |
-| [CSLA Iron Curtain](https://store.steampowered.com/app/1294440/Arma_3_Creator_DLC_CSLA_Iron_Curtain/) | csla |
-| [Global Mobilization - Cold War Germany](https://store.steampowered.com/app/1042220/Arma_3_Creator_DLC_Global_Mobilization__Cold_War_Germany/) | gm |
-| [S.O.G. Prairie Fire](https://store.steampowered.com/app/1227700/Arma_3_Creator_DLC_SOG_Prairie_Fire) | vn |
-| [Western Sahara](https://store.steampowered.com/app/1681170/Arma_3_Creator_DLC_Western_Sahara/) | ws |
-| [Spearhead 1944](https://store.steampowered.com/app/1175380/Arma_3_Creator_DLC_Spearhead_1944/) | spe |
-| [Reaction Forces](https://store.steampowered.com/app/2647760/Arma_3_Creator_DLC_Reaction_Forces/) | rf |
-| [Expeditionary Forces](https://store.steampowered.com/app/2647830/Arma_3_Creator_DLC_Expeditionary_Forces/) | ef |
+| Name                        | Code  |
+| --------------------------- | ----- |
+| CSLA Iron Curtain           | csla  |
+| Global Mobilization         | gm    |
+| S.O.G. Prairie Fire         | vn    |
+| Western Sahara              | ws    |
+| Spearhead 1944              | spe   |
+| Reaction Forces             | rf    |
+| Expeditionary Forces        | ef    |
 
-Bohemia-updated list of codes here: <https://community.bistudio.com/wiki/Category:Arma_3:_CDLCs>
+## Ports
 
-### Example
+| Port   | Protocol | Purpose           |
+| ------ | -------- | ----------------- |
+| 2302   | UDP      | Game              |
+| 2303   | UDP      | Query (+1)        |
+| 2304   | UDP      | Steam (+2)        |
+| 2305   | UDP      | VON (+3)          |
+| 2306   | UDP      | BattlEye (+4)     |
 
-`-e ARMA_CDLC="csla;gm;vn;ws;spe"`
+## Data Persistence
 
-## Loading mods
+All server data lives in `/arma3/server`. The following volumes are available:
 
-### Local
+| Volume mount                          | Purpose              |
+| ------------------------------------- | -------------------- |
+| `./server:/arma3/server`              | Server files & steamapps |
+| `./configs:/arma3/server/configs`     | Config files         |
+| `./mods:/arma3/server/mods`           | Client-side mods     |
+| `./servermods:/arma3/server/servermods` | Server-side mods    |
 
-1. Place the mods inside `/mods` or `/servermods`.
-2. Be sure that the mod folder is all lowercase and does not show up with quotation marks around it when listing the directory eg `'@ACE(v2)'`
-3. Run the following command from the mods and/or servermods directory to confirm that all the files are lowercase.
-    `find . -depth -exec rename 's/(.*)\/([^\/]*)/$1\/\L$2/' {} \;`
-    If this is NOT the case, the mods will prevent the server from booting.
-4. Make sure that each mod contains a lowercase `/addons` folder. This folder also needs to be lowercase in order for the server to load the required PBO files inside.
-5. Start the server.
+## Profiles
 
-### Workshop
+Profiles are stored in `/arma3/server/configs/profiles`.
 
-Set the environment variable `MODS_PRESET` to the HTML preset file exported from the Arma 3 Launcher. The path can be local file or a URL. A volume can be created at `/arma3/server/workshop/` to preserve the mods between containers separately from the main `/arma3/server` volume.
+## Steam Branches
 
-`-e MODS_PRESET="my_mods.html"`
-
-`-e MODS_PRESET="http://example.com/my_mods.html"`
+[List of Arma 3 Steam branches](https://community.bistudio.com/wiki/Arma_3:_Steam_Branches) on the Bohemia Community Wiki.
