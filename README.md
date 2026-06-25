@@ -37,7 +37,7 @@ Log inspection: `podman logs arma3`
 
 ## Volumes
 
-As mentioned, this is a podman/docker container image. Containers,
+As mentioned, this is a podman/docker container image. Containers
 are built to be heavily isolated. To share files between the main host
 system and the container, a volume mounting system is employed.
 
@@ -57,13 +57,13 @@ mirrored to `/arma3/server/configs` inside the container.
 
 ## Volume mount guide
 
-* `/arma3/server/configs` — all `.cfg` files piped to Arma.
-* `/arma3/server/presets` — mod preset `.html` files.
-* `/arma3/server/mods` — client-side mods.
-* `/arma3/server/servermods` — server-side mods.
-* `/arma3/server/mpmissions` — missions.
-* `/arma3/server/` — the server install, workshop cache, keys. Auxiliary.
-* `/arma3/Steam/config` — mounted directly from your host. Handles Steam login persistence.
+* `/arma3/server/configs` -- all `.cfg` files piped to Arma.
+* `/arma3/server/presets` -- mod preset `.html` files.
+* `/arma3/server/mods` -- client-side mods.
+* `/arma3/server/servermods` -- server-side mods.
+* `/arma3/server/mpmissions` -- missions.
+* `/arma3/server/` -- the server install, workshop cache, keys. Auxiliary.
+* `/arma3/Steam/config` -- mounted directly from your host. Handles Steam login persistence.
 
 
 ## Workshop mods
@@ -118,7 +118,7 @@ csla · gm · vn · ws · spe · rf · ef
 
 ## Ports
 
-The container uses host networking. Open all 5 on your firewall:
+The container uses host networking. All 5 are required to be open on your firewall.
 
 ```
 2302 ─ game
