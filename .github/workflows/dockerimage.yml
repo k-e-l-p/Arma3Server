@@ -1,20 +1,11 @@
-name: Docker Image CI
+name: Docker Build Test
 
 on: [push, pull_request]
 
 jobs:
-  docker:
+  build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v1
-    - name: Build the Docker image
-      run: docker build . --tag "arma3server:$(date +%s)"
-
-  docker-compose:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v1
-    - name: Copy .env file
-      run: cp .env.example .env
-    - name: Build the Docker image
-      run: docker compose build
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build . --tag arma3server:ci
