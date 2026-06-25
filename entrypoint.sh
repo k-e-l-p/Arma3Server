@@ -1,8 +1,7 @@
 #!/bin/bash
 set -o errexit -o pipefail
 
-root="${HOME:-/arma3}"
-server="$root/server"
+server="${HOME:-/arma3}/server"
 
 error() { echo >&2 "[arma3] ERROR: $@"; exit 1; }
 warn()  { echo >&2 "[arma3] WARN: $@"; }
@@ -39,10 +38,10 @@ steamcmd_update() {
     /tmp/steamcmd/steamcmd.sh "${a[@]}"
 }
 
-steamclient_fix() {
+steamclient_setup() {
     local arch
     for arch in 32 64; do
-        local dst="$root/.steam/sdk${arch}/steamclient.so"
+        local dst="$HOME/.steam/sdk${arch}/steamclient.so"
         [ -f "$dst" ] && continue
         mkdir -p "$(dirname "$dst")"
         cp -f "/tmp/steamcmd/linux${arch}/steamclient.so" "$dst"
@@ -106,6 +105,7 @@ patch_mods() {
     local d="$server/mods"
     [ -d "$d" ] || return 0
 
+    # lowercase all files, depth-first so parent dirs resolve after children
     find -L "$d" -depth -print0 2>/dev/null | while IFS= read -r -d '' f; do
         base=$(basename "$f")
         lower=$(echo "$base" | tr '[:upper:]' '[:lower:]')
@@ -168,6 +168,7 @@ launch_hcs() {
     local template="${HEADLESS_CLIENTS_PROFILE:-\$profile-hc-\$i}"
     mkdir -p "$server/configs/profiles"
     for (( i = 0; i < count; i++ )); do
+        # expand $profile, $i, $ii placeholders in the HC profile template
         local name="$template"
         name=${name//\$profile/${ARMA_PROFILE:-main}}
         name=${name//\$i/$i}
@@ -189,7 +190,7 @@ do_update() {
     steamcmd_update "$@"
     install_preset_mods
     symlink_workshop_mods
-    steamclient_fix
+    steamclient_setup
 }
 
 do_start() {
@@ -239,6 +240,7 @@ do_start() {
         done
     fi
 
+    # kill all child processes (server + HCs) when this script exits
     trap 'kill 0' EXIT
 
     cd "$server"
