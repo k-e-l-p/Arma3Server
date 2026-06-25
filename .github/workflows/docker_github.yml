@@ -2,10 +2,10 @@ name: Build and Push
 
 on:
   push:
-    branches: [main]
+    branches: [main, v2]
     tags: ['*']
   pull_request:
-    branches: [main]
+    branches: [main, v2]
 
 jobs:
   build:
