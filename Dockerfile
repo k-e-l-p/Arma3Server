@@ -1,10 +1,9 @@
-FROM docker.io/ubuntu:24.04
-
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+FROM docker.io/debian:bookworm-slim@sha256:1def178129dfb5f24db43afbf2fcac04530012e3264ba4ff81c71184e17a9ee4
 
 RUN export DEBIAN_FRONTEND=noninteractive \
-    && groupadd -g 1100 arma3 \
-    && useradd -m -d /arma3 -u 1100 -g 1100 arma3 \
+    && groupadd -g 1100 arma3 2>/dev/null || groupadd -r arma3 \
+    && useradd -m -d /arma3 -u 1100 -g 1100 arma3 2>/dev/null \
+        || useradd -m -d /arma3 -g "$(getent group arma3 | cut -d: -f3)" arma3 \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         lib32stdc++6 \
@@ -14,11 +13,10 @@ RUN export DEBIAN_FRONTEND=noninteractive \
         ca-certificates \
         tar \
         xz-utils \
-        rename \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
-    && mkdir -p /arma3/server \
-    && chown arma3:arma3 /arma3/server
+    && mkdir -p /arma3/server /arma3/server/presets \
+    && chown arma3:arma3 /arma3/server /arma3/server/presets
 
 USER arma3:arma3
 WORKDIR /arma3

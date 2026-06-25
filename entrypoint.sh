@@ -1,389 +1,258 @@
 #!/bin/bash
+set -o errexit -o pipefail
 
-set -o errexit
-set -o pipefail
+error() { echo >&2 "[arma3] ERROR: $*"; exit 1; }
+warn()  { echo >&2 "[arma3] WARN: $*"; }
 
-function error() {
-    echo >&2 "[arma3-error] $1"
-    exit 1
+# ---- steamcmd ---------------------------------------------------------------
+
+steam_user="${STEAM_USER:-}"
+steam_pass="${STEAM_PASSWORD:-}"
+
+check_creds() {
+    [ -n "$steam_user" ] && [ -n "$steam_pass" ] && return
+    error "Set STEAM_USER and STEAM_PASSWORD"
 }
 
-# ─── SteamCMD helpers ──────────────────────────────────────────────────────────
-
-function check_steam_credentials() {
-    if [ -z "$STEAM_USER" ] || [ -z "$STEAM_PASSWORD" ]; then
-        error "Missing steam login info. Set STEAM_USER and STEAM_PASSWORD."
-    fi
+steamcmd_init() {
+    local d=/tmp/steamcmd
+    mkdir -p "$d"
+    [ -f "$d/steamcmd.sh" ] && return
+    ( cd "$d" && wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz \
+        && tar -xzf steamcmd_linux.tar.gz && rm steamcmd_linux.tar.gz )
+    mkdir -p /arma3/server/steamapps
 }
 
-function ensure_steamcmd() {
-    mkdir -vp /tmp/steamcmd
-    if [ ! -f "/tmp/steamcmd/steamcmd.sh" ]; then
-        cd /tmp/steamcmd
-        wget -q "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
-        tar -xzf steamcmd_linux.tar.gz
-        rm steamcmd_linux.tar.gz
-    fi
-    mkdir -vp /arma3/server/steamapps
+steam_login_args() { echo +login "$steam_user" "$steam_pass"; }
+
+steamcmd_update() {
+    steamcmd_init
+    local -a a=( +force_install_dir /arma3/server $(steam_login_args) +app_update 233780 )
+    [ -n "${STEAM_BRANCH:-}" ] && a+=(-beta "$STEAM_BRANCH")
+    [ -n "${STEAM_BRANCH_PASSWORD:-}" ] && a+=(-betapassword "$STEAM_BRANCH_PASSWORD")
+    a+=("$@")
+    /tmp/steamcmd/steamcmd.sh "${a[@]}"
 }
 
-function post_update() {
-    local s32="/arma3/.steam/sdk32/steamclient.so"
-    local s64="/arma3/.steam/sdk64/steamclient.so"
-
-    if [ ! -f "$s32" ]; then
-        mkdir -vp "$(dirname "$s32")"
-        cp -v /tmp/steamcmd/linux32/steamclient.so "$s32"
-    fi
-    if [ ! -f "$s64" ]; then
-        mkdir -vp "$(dirname "$s64")"
-        cp -v /tmp/steamcmd/linux64/steamclient.so "$s64"
-    fi
-}
-
-# Run a steamcmd line safely.
-# All arguments after +force_install_dir ... +app_update 233780 are passed through.
-function run_steamcmd_update() {
-    local args=(
-        +force_install_dir /arma3/server
-        +login "$STEAM_USER" "$STEAM_PASSWORD"
-        +app_update 233780
-    )
-    if [ -n "$STEAM_BRANCH" ]; then
-        args+=(-beta "$STEAM_BRANCH")
-        if [ -n "$STEAM_BRANCH_PASSWORD" ]; then
-            args+=(-betapassword "$STEAM_BRANCH_PASSWORD")
-        fi
-    fi
-    args+=("$@")
-
-    /tmp/steamcmd/steamcmd.sh "${args[@]}"
-}
-
-# ─── Server install / update ───────────────────────────────────────────────────
-
-function update_validate() {
-    check_steam_credentials
-    ensure_steamcmd
-    run_steamcmd_update validate +quit
-    install_managed_mods
-    install_preset_mods
-    symlink_workshop_mods
-    post_update
-}
-
-function update() {
-    check_steam_credentials
-    ensure_steamcmd
-    run_steamcmd_update +quit
-    install_managed_mods
-    install_preset_mods
-    symlink_workshop_mods
-    post_update
-}
-
-# ─── Mod management ────────────────────────────────────────────────────────────
-
-function download_workshop_mod() {
-    local modid="$1"
-    ensure_steamcmd
-    local attempt=1
-    while true; do
-        echo "[mod] Downloading $modid (attempt $attempt)..."
-        /tmp/steamcmd/steamcmd.sh \
-            +login "$STEAM_USER" "$STEAM_PASSWORD" \
-            +workshop_download_item 107410 "$modid" \
-            +quit && break
-        attempt=$((attempt + 1))
-        if [ "$attempt" -le 5 ]; then
-            echo "[mod] Download of $modid failed, retrying..."
-        else
-            echo "[mod] Download of $modid failed 5 times, skipping."
-            return 1
-        fi
-    done
-    echo "[mod] $modid downloaded."
-}
-
-function install_managed_mods() {
-    [ -n "$MANAGED_MODS" ] || return 0
-
-    echo "=== Installing managed mods ==="
-    check_steam_credentials
-    ensure_steamcmd
-
-    readarray -d ' ' -t MOD_ARRAY < <(printf '%s' "$MANAGED_MODS")
-    local WS="/arma3/server/Steam/steamapps/workshop/content/107410"
-
-    # Remove workshop mods no longer in MANAGED_MODS
-    if [ -d "$WS" ]; then
-        for d in "$WS"/*/; do
-            [ -d "$d" ] || continue
-            local wid
-            wid=$(basename "$d")
-            if [[ ! " ${MOD_ARRAY[*]} " =~ " ${wid} " ]]; then
-                echo "[mod] Removing unmanaged mod $wid"
-                rm -rf "$d"
-            fi
-        done
-    fi
-
-    for modid in "${MOD_ARRAY[@]}"; do
-        [ -z "$modid" ] && continue
-        download_workshop_mod "$modid"
+steamclient_fix() {
+    for pair in "linux32:sdk32" "linux64:sdk64"; do
+        local arch=${pair%:*} sdk=${pair#*:}
+        local dst="/arma3/.steam/${sdk}/steamclient.so"
+        [ -f "$dst" ] && continue
+        mkdir -p "$(dirname "$dst")"
+        cp "/tmp/steamcmd/${arch}/steamclient.so" "$dst"
     done
 }
 
-function install_preset_mods() {
-    [ -n "$MODS_PRESET" ] || return 0
+# ---- mod download -----------------------------------------------------------
 
-    echo "=== Processing mod preset: $MODS_PRESET ==="
-    check_steam_credentials
+workshop_download() {
+    local id=$1
+    steamcmd_init
+    local n=0
+    while (( n < 5 )); do
+        (( n++ ))
+        echo "[mod] $id attempt $n/5"
+        /tmp/steamcmd/steamcmd.sh $(steam_login_args) \
+            +workshop_download_item 107410 "$id" +quit && return 0
+        echo "[mod] $id retrying..."
+    done
+    warn "mod $id failed after 5 attempts"
+    return 1
+}
 
-    local html="/tmp/arma3_preset.html"
-    if [[ "$MODS_PRESET" == http://* ]] || [[ "$MODS_PRESET" == https://* ]]; then
-        wget -q -O "$html" "$MODS_PRESET" || {
-            echo "[preset] Warning: failed to download $MODS_PRESET"
-            return 0
-        }
-    else
-        html="$MODS_PRESET"
-    fi
-
-    [ -f "$html" ] || { echo "[preset] File not found: $MODS_PRESET"; return 0; }
+install_preset_mods() {
+    [ -n "${MODS_PRESET:-}" ] || return 0
+    echo "=== preset mods: $MODS_PRESET ==="
+    local html
+    case "$MODS_PRESET" in
+        http://*|https://*)
+            html=/tmp/arma3_preset.html
+            wget -qO "$html" "$MODS_PRESET" || { warn "failed to fetch $MODS_PRESET"; return 0; } ;;
+        *)
+            html="/arma3/server/presets/$MODS_PRESET"
+            [ -f "$html" ] || { warn "preset not found: $html"; return 0; } ;;
+    esac
 
     local ids
-    ids=$(grep -oP 'filedetails/\?id=\K\d+' "$html" | sort -u)
-    [ -n "$ids" ] || { echo "[preset] No workshop IDs found."; return 0; }
-
-    echo "[preset] Workshop IDs: $ids"
-    for modid in $ids; do
-        download_workshop_mod "$modid"
-    done
+    ids=$(sed -nE 's/.*filedetails\/\?id=([0-9]+).*/\1/p' "$html" | sort -u)
+    [ -n "$ids" ] || { warn "no workshop IDs in preset"; return 0; }
+    echo "[preset] IDs: $ids"
+    for id in $ids; do workshop_download "$id"; done
 }
 
-function symlink_workshop_mods() {
-    local WS="/arma3/server/Steam/steamapps/workshop/content/107410"
-    local MODS="/arma3/server/mods"
-    [ -d "$WS" ] || return 0
-
-    mkdir -vp "$MODS"
-    for d in "$WS"/*/; do
+symlink_workshop_mods() {
+    local ws=/arma3/server/Steam/steamapps/workshop/content/107410
+    local mods=/arma3/server/mods
+    [ -d "$ws" ] || return 0
+    mkdir -p "$mods"
+    for d in "$ws"/*/; do
         [ -d "$d" ] || continue
-        local wid
-        wid=$(basename "$d")
-        local link="$MODS/$wid"
-        if [ ! -L "$link" ] && [ ! -e "$link" ]; then
-            ln -sv "../Steam/steamapps/workshop/content/107410/$wid" "$link"
-        fi
+        local id
+        id=$(basename "$d")
+        [ -e "$mods/$id" ] && continue
+        ln -s "../Steam/steamapps/workshop/content/107410/$id" "$mods/$id"
     done
-
-    # Clear broken symlinks (e.g. to removed workshop mods)
-    find "$MODS" -xtype l -delete -print 2>/dev/null || true
 }
 
-# ─── Utility functions ─────────────────────────────────────────────────────────
+# ---- mod patching / keys ----------------------------------------------------
 
-function patch_mods() {
-    local d="/arma3/server/mods"
+patch_mods() {
+    local d=/arma3/server/mods
     [ -d "$d" ] || return 0
 
-    echo "Patching mods (lowercase + underscores)..."
-
-    # Recursively lowercase files
     find -L "$d" -depth -print0 2>/dev/null | while IFS= read -r -d '' f; do
-        local dir base lower
-        dir=$(dirname "$f")
+        local base lower
         base=$(basename "$f")
         lower=$(echo "$base" | tr '[:upper:]' '[:lower:]')
-        if [ "$base" != "$lower" ]; then
-            mv -v "$f" "$dir/$lower" 2>/dev/null || true
-        fi
+        [ "$base" = "$lower" ] && continue
+        mv "$f" "$(dirname "$f")/$lower" 2>/dev/null || true
     done
 
-    # Replace spaces with underscores in top-level mod directories
-    find "$d" -maxdepth 1 -mindepth 1 -type d -print0 2>/dev/null | while IFS= read -r -d '' m; do
-        local dir base fixed
-        dir=$(dirname "$m")
+    for m in "$d"/*/; do
+        [ -d "$m" ] || continue
+        local base fixed
         base=$(basename "$m")
-        fixed=$(echo "$base" | tr ' ' '_')
-        if [ "$base" != "$fixed" ]; then
-            mv -v "$m" "$dir/$fixed" 2>/dev/null || true
-        fi
+        fixed=${base// /_}
+        [ "$base" = "$fixed" ] && continue
+        mv "$m" "$(dirname "$m")/$fixed" 2>/dev/null || true
     done
 }
 
-function extract_mod_keys() {
-    [ "${EXTRACT_MOD_KEYS:-false}" == "true" ] || return 0
-
-    echo "Extracting mod signature keys..."
-    mkdir -vp /arma3/server/keys
-
-    for src in "/arma3/server/mods" "/arma3/server/servermods"; do
+extract_keys() {
+    [ "${EXTRACT_MOD_KEYS:-}" = true ] || return 0
+    mkdir -p /arma3/server/keys
+    for src in /arma3/server/mods /arma3/server/servermods; do
         [ -d "$src" ] || continue
-        find -L "$src" -type f -name "*.bikey" -print0 2>/dev/null | \
-            xargs -0 -I{} cp -vf "{}" /arma3/server/keys/ || true
+        find -L "$src" -name '*.bikey' -exec cp -t /arma3/server/keys {} + 2>/dev/null || true
     done
 }
 
-function manage_keys() {
-    if [ "${CLEAR_KEYS:-true}" == "true" ] && [ -d "/arma3/server/keys" ]; then
-        echo "Clearing keys directory..."
-        rm -rf /arma3/server/keys/*
+keys_init() {
+    [ "${CLEAR_KEYS:-true}" = true ] && [ -d /arma3/server/keys ] && rm -rf /arma3/server/keys/*
+    mkdir -p /arma3/server/keys
+}
+
+# ---- mod list builder -------------------------------------------------------
+
+collect_mods() {
+    local dir=$1 prefix=$2 outvar=$3 result=""
+    if [ -d "$dir" ]; then
+        for d in "$dir"/*/; do
+            [ -d "$d" ] || continue
+            local name
+            name=$(basename "$d")
+            result="${result:+$result;}$prefix/$name"
+        done
     fi
-    mkdir -vp /arma3/server/keys
+    printf -v "$outvar" '%s' "$result"
 }
 
-# ─── Mod list builders (set global MODLIST / SERVER_MODLIST) ───────────────────
+# ---- headless clients -------------------------------------------------------
 
-function build_modlist() {
-    MODLIST=""
-    local d="/arma3/server/mods"
-    [ -d "$d" ] || return 0
-
-    for m in "$d"/*/; do
-        [ -d "$m" ] || continue
-        local name
-        name=$(basename "$m")
-        if [ -z "$MODLIST" ]; then
-            MODLIST="mods/$name"
-        else
-            MODLIST="$MODLIST;mods/$name"
-        fi
-    done
-}
-
-function build_server_modlist() {
-    SERVER_MODLIST=""
-    local d="/arma3/server/servermods"
-    [ -d "$d" ] || return 0
-
-    for m in "$d"/*/; do
-        [ -d "$m" ] || continue
-        local name
-        name=$(basename "$m")
-        if [ -z "$SERVER_MODLIST" ]; then
-            SERVER_MODLIST="servermods/$name"
-        else
-            SERVER_MODLIST="$SERVER_MODLIST;servermods/$name"
-        fi
-    done
-}
-
-# ─── Headless client helpers ───────────────────────────────────────────────────
-
-function configure_headless_clients() {
-    local src="/arma3/server/configs/$1"
-    local tmp="/tmp/arma3.cfg"
-
+hc_config_amend() {
+    local src=/arma3/server/configs/$1 tmp=/tmp/arma3.cfg
     cat "$src" > "$tmp"
-    if ! grep -qi 'headlessclients\[\]' "$tmp" 2>/dev/null; then
+    grep -qi 'headlessclients\[\]' "$tmp" 2>/dev/null || \
         echo 'headlessclients[] = {"127.0.0.1"};' >> "$tmp"
-    fi
-    if ! grep -qi 'localclient\[\]' "$tmp" 2>/dev/null; then
+    grep -qi 'localclient\[\]' "$tmp" 2>/dev/null || \
         echo 'localclient[] = {"127.0.0.1"};' >> "$tmp"
-    fi
 }
 
-function launch_headless_clients() {
-    local count="$1"
+launch_hcs() {
+    local count=$1
     local template="${HEADLESS_CLIENTS_PROFILE:-\$profile-hc-\$i}"
-
-    mkdir -vp /arma3/server/configs/profiles
-
-    for ((i = 0; i < count; i++)); do
-        local ii=$((i + 1))
-        local hc="$template"
-        hc="${hc//\$profile/${ARMA_PROFILE:-main}}"
-        hc="${hc//\$i/$i}"
-        hc="${hc//\$ii/$ii}"
-
-        local hc_cmd="${ARMA_BINARY:-./arma3server_x64}"
-        hc_cmd="$hc_cmd -client -connect=127.0.0.1 -port=${PORT:-2302}"
-        hc_cmd="$hc_cmd -name='$hc'"
-        hc_cmd="$hc_cmd -profiles='/arma3/server/configs/profiles'"
-
-        echo "LAUNCHING HEADLESS CLIENT $i: $hc_cmd"
-        eval "$hc_cmd" &
+    mkdir -p /arma3/server/configs/profiles
+    for (( i = 0; i < count; i++ )); do
+        local name="$template"
+        name=${name//\$profile/${ARMA_PROFILE:-main}}
+        name=${name//\$i/$i}
+        name=${name//\$ii/$((i+1))}
+        local -a hc=( ./arma3server_x64 -client -connect=127.0.0.1 -port="${PORT:-2302}"
+                      -name="$name" -profiles=/arma3/server/configs/profiles )
+        [ -n "${MODLIST:-}" ] && hc+=(-mod="$MODLIST")
+        [ -n "${SERVER_MODLIST:-}" ] && hc+=(-serverMod="$SERVER_MODLIST")
+        echo "HC $i: ${hc[*]}"
+        "${hc[@]}" &
         sleep 2
     done
 }
 
-# ─── Start the server ──────────────────────────────────────────────────────────
+# ---- update / start ---------------------------------------------------------
 
-function start() {
+do_update() {
+    check_creds
+    steamcmd_update "$@"
+    install_preset_mods
+    symlink_workshop_mods
+    steamclient_fix
+}
+
+do_start() {
     patch_mods
-    manage_keys
-    extract_mod_keys
+    keys_init
+    extract_keys
 
-    local binary="${ARMA_BINARY:-./arma3server_x64}"
     local port="${PORT:-2302}"
     local config="${ARMA_CONFIG:-main.cfg}"
-    local basic_cfg="${ARMA_BASIC_CONFIG:-basic.cfg}"
     local profile="${ARMA_PROFILE:-main}"
     local world="${ARMA_WORLD:-empty}"
     local limitfps="${ARMA_LIMITFPS:-50}"
-    local params="${ARMA_PARAMS:-}"
-    local headless="${HEADLESS_CLIENTS:-0}"
+    local hcs="${HEADLESS_CLIENTS:-0}"
 
-    build_modlist
-    build_server_modlist
+    collect_mods /arma3/server/mods mods MODLIST
+    collect_mods /arma3/server/servermods servermods SERVER_MODLIST
 
-    # Build command
-    local cmd="$binary"
-    cmd="$cmd -ip=0.0.0.0 -port=$port"
-    cmd="$cmd -name='$profile'"
-
-    if [ -f "/arma3/server/configs/$basic_cfg" ]; then
-        cmd="$cmd -cfg='/arma3/server/configs/$basic_cfg'"
+    if [ "${MODS_LOCAL:-true}" != true ]; then
+        MODLIST=""
+        SERVER_MODLIST=""
     fi
 
-    if [ "$headless" != "0" ] && [ -n "$headless" ]; then
-        configure_headless_clients "$config"
-        cmd="$cmd -config='/tmp/arma3.cfg'"
+    local -a cmd=( "${ARMA_BINARY:-./arma3server_x64}"
+                   -ip=0.0.0.0 -port="$port" -name="$profile" )
+
+    if [ -f "/arma3/server/configs/${ARMA_BASIC_CONFIG:-basic.cfg}" ]; then
+        cmd+=(-cfg="/arma3/server/configs/${ARMA_BASIC_CONFIG:-basic.cfg}")
+    fi
+
+    if [ "$hcs" != 0 ] && [ -n "$hcs" ]; then
+        hc_config_amend "$config"
+        cmd+=(-config=/tmp/arma3.cfg)
     else
-        cmd="$cmd -config='/arma3/server/configs/$config'"
+        cmd+=(-config="/arma3/server/configs/$config")
     fi
 
-    cmd="$cmd -profiles='/arma3/server/configs/profiles'"
-    cmd="$cmd -world=$world -limitFPS=$limitfps"
+    cmd+=(-profiles=/arma3/server/configs/profiles -world="$world" -limitFPS="$limitfps")
+    [ -n "$MODLIST" ] && cmd+=(-mod="$MODLIST")
+    [ -n "$SERVER_MODLIST" ] && cmd+=(-serverMod="$SERVER_MODLIST")
 
-    if [ -n "$MODLIST" ]; then
-        cmd="$cmd -mod='$MODLIST'"
-    fi
-    if [ -n "$SERVER_MODLIST" ]; then
-        cmd="$cmd -serverMod='$SERVER_MODLIST'"
-    fi
-    if [ -n "$params" ]; then
-        cmd="$cmd $params"
+    if [ -n "${ARMA_PARAMS:-}" ]; then
+        for p in ${ARMA_PARAMS}; do
+            [ -n "$p" ] && cmd+=("$p")
+        done
     fi
 
     cd /arma3/server
-    echo "LAUNCHING ARMA SERVER: $cmd"
-    eval "$cmd" &
-    local server_pid=$!
+    echo "SERVER: ${cmd[*]}"
+    "${cmd[@]}" &
+    local pid=$!
 
-    if [ "$headless" != "0" ] && [ -n "$headless" ]; then
-        launch_headless_clients "$headless"
-    fi
-
-    wait "$server_pid"
+    [ "$hcs" != 0 ] && launch_hcs "$hcs"
+    wait "$pid"
 }
 
-# ─── Entry point ───────────────────────────────────────────────────────────────
+# ---- entry point ------------------------------------------------------------
 
 case "${1:-}" in
     update)
-        update
-        ;;
+        do_update +quit ;;
     update_validate)
-        update_validate
-        ;;
+        do_update validate +quit ;;
     start)
-        start
-        ;;
+        do_start ;;
     *)
-        update_validate
-        start
-        ;;
+        if [ "${SKIP_INSTALL:-false}" != true ]; then
+            do_update validate +quit
+        fi
+        do_start ;;
 esac
