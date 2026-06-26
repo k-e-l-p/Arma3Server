@@ -21,9 +21,9 @@ steamcmd_init() {
     mkdir -p "$d"
     if [ ! -f "$d/steamcmd.sh" ]; then
         local tmp="$d/steamcmd.tar.gz"
-        wget --tries=5 --timeout=30 -qO "$tmp" \
-            https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz \
-            || { rm -f "$tmp"; error "failed to download steamcmd"; }
+        local url="https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
+        wget -4 --tries=5 --timeout=30 -qO "$tmp" "$url" 2>&1 \
+            || { rm -f "$tmp"; error "failed to download steamcmd from $url (check DNS/internet)"; }
         ( cd "$d" && tar -xzf "$tmp" && rm "$tmp" ) \
             || { rm -rf "$d"; error "failed to extract steamcmd"; }
     fi
