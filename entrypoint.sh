@@ -3,8 +3,8 @@ set -o errexit -o pipefail
 
 server="${HOME:-/arma3}/server"
 
-error() { echo >&2 "[arma3] ERROR: $@"; exit 1; }
-warn()  { echo >&2 "[arma3] WARN: $@"; }
+error() { echo >&2 "[arma3] ERROR: $*"; exit 1; }
+warn()  { echo >&2 "[arma3] WARN: $*"; }
 
 # ---- steamcmd ----------------------------------------------------------------
 
@@ -37,7 +37,9 @@ steamcmd_update() {
     local -a a=( +force_install_dir "$server" +login "$steam_user" "$steam_pass" )
     [ -n "${STEAM_BRANCH:-}" ] && a+=(-beta "$STEAM_BRANCH")
     [ -n "${STEAM_BRANCH_PASSWORD:-}" ] && a+=(-betapassword "$STEAM_BRANCH_PASSWORD")
-    a+=( +app_update 1391110 $validate +quit )
+    a+=( +app_update 1391110 )
+    [ -n "$validate" ] && a+=(validate)
+    a+=( +quit )
     /tmp/steamcmd/steamcmd.sh "${a[@]}"
 }
 
