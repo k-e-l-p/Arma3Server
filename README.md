@@ -45,7 +45,9 @@ Log inspection: `podman logs arma3`
 
 NOTE: The above commands assume a fully local, default-location
       Steam installation. The config folder will likely be located
-      elsewhere is installed via Flatpak
+      elsewhere if installed via Flatpak. The container runs as UID
+      1100 — all mounted directories must be readable and writable
+      by that user (or `chown -R 1100:1100` on the host side).
 
 ## Volumes
 

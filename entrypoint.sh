@@ -37,9 +37,8 @@ steamcmd_update() {
     local -a a=( +force_install_dir "$server" +login "$steam_user" "$steam_pass" )
     [ -n "${STEAM_BRANCH:-}" ] && a+=(-beta "$STEAM_BRANCH")
     [ -n "${STEAM_BRANCH_PASSWORD:-}" ] && a+=(-betapassword "$STEAM_BRANCH_PASSWORD")
-    # 1391110 must install first — 233780 declares a depot dependency on it.
-    /tmp/steamcmd/steamcmd.sh "${a[@]}" +app_update 1391110 $validate +quit
-    /tmp/steamcmd/steamcmd.sh "${a[@]}" +app_update 233780 $validate +quit
+    a+=( +app_update 1391110 $validate +quit )
+    /tmp/steamcmd/steamcmd.sh "${a[@]}"
 }
 
 steamclient_setup() {
@@ -54,18 +53,24 @@ steamclient_setup() {
 
 # ---- mod download ------------------------------------------------------------
 
-workshop_download() {
-    local id=$1
+workshop_download_all() {
+    local ids="$1"
+    [ -n "$ids" ] || return 0
     steamcmd_init
-    local n=0
-    while (( n < 5 )); do
-        (( n++ ))
-        echo "[mod] $id attempt $n/5"
-        /tmp/steamcmd/steamcmd.sh +login "$steam_user" "$steam_pass" \
-            +workshop_download_item 107410 "$id" +quit && return 0
-        echo "[mod] $id retrying..."
+    local -a a=( +login "$steam_user" "$steam_pass" )
+    for id in $ids; do
+        a+=( +workshop_download_item 107410 "$id" )
     done
-    warn "mod $id failed after 5 attempts"
+    a+=( +quit )
+
+    local attempt=0
+    while (( attempt < 5 )); do
+        (( attempt++ ))
+        echo "[mod] batch attempt $attempt/5 (${ids})"
+        /tmp/steamcmd/steamcmd.sh "${a[@]}" && return 0
+        echo "[mod] batch retrying..."
+    done
+    warn "mod batch failed after 5 attempts"
     return 1
 }
 
@@ -86,7 +91,7 @@ install_preset_mods() {
     ids=$(sed -nE 's,.*filedetails/\?id=([0-9]+).*,\1,p' "$html" | sort -u)
     [ -n "$ids" ] || { warn "no workshop IDs in preset"; return 0; }
     echo "[preset] IDs: $ids"
-    for id in $ids; do workshop_download "$id" || true; done
+    workshop_download_all "$ids" || true
 }
 
 symlink_workshop_mods() {
