@@ -36,8 +36,9 @@ steamcmd_update() {
     local -a a=( +force_install_dir "$server" +login "$steam_user" "$steam_pass" )
     [ -n "${STEAM_BRANCH:-}" ] && a+=(-beta "$STEAM_BRANCH")
     [ -n "${STEAM_BRANCH_PASSWORD:-}" ] && a+=(-betapassword "$STEAM_BRANCH_PASSWORD")
-    a+=( +app_update 1391110 $validate +app_update 233780 $validate +quit )
-    /tmp/steamcmd/steamcmd.sh "${a[@]}"
+    # 1391110 must install first — 233780 declares a depot dependency on it.
+    /tmp/steamcmd/steamcmd.sh "${a[@]}" +app_update 1391110 $validate +quit
+    /tmp/steamcmd/steamcmd.sh "${a[@]}" +app_update 233780 $validate +quit
 }
 
 steamclient_setup() {
