@@ -10,7 +10,7 @@ Inspired by/Forked from:
 To run, you will need a Linux machine with `podman` installed.
 
 Clone this repository, copy `.env.example` to `.env` and fill in your Steam login:
-```
+```text
 STEAM_USER=your_steam_username
 STEAM_PASSWORD=your_steam_password
 ```
@@ -18,7 +18,7 @@ STEAM_PASSWORD=your_steam_password
 The Arma 3 dedicated server (App ID 233780) is free but must be on the account. If you've never downloaded it
 before, run this once on the host to claim the license:
 
-```
+```sh
 steamcmd +login your_steam_username your_steam_password +app_license_request 233780 +quit
 ```
 
@@ -62,7 +62,7 @@ be whatever you want.
 
 Quick volume mount explanation: Take `-v ./configs:/arma3/server/configs`:
 * `-v` specifies that a volume is being defined
-* `./configs` is the path that is **On The Host** 
+* `./configs` is the path that is **On The Host**
 * `:` is the separator
 * `/arma3/server/configs` is the path that is **Inside The Container**
 
@@ -112,7 +112,7 @@ Local mods (not on the Workshop) go in `mods/` for client-side and `servermods/`
 
 `STEAM_BRANCH=creatordlc` and `ARMA_CDLC=ws;gm;spe` or similar.
 
-```
+```text
 csla · gm · vn · ws · spe · rf · ef
 ```
 
@@ -120,7 +120,7 @@ csla · gm · vn · ws · spe · rf · ef
 
 The container uses host networking. All 5 are required to be open on your firewall.
 
-```
+```text
 2302 ─ game
 2303 ─ Steam query
 2304 ─ Steam master
