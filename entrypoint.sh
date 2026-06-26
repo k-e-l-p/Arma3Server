@@ -18,15 +18,14 @@ check_creds() {
 
 steamcmd_init() {
     local d=/tmp/steamcmd
+    rm -rf "$d"
     mkdir -p "$d"
-    if [ ! -f "$d/steamcmd.sh" ]; then
-        local tmp="$d/steamcmd.tar.gz"
-        local url="https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
-        wget -4 --tries=5 --timeout=30 -qO "$tmp" "$url" 2>&1 \
-            || { rm -f "$tmp"; error "failed to download steamcmd from $url (check DNS/internet)"; }
-        ( cd "$d" && tar -xzf "$tmp" && rm "$tmp" ) \
-            || { rm -rf "$d"; error "failed to extract steamcmd"; }
-    fi
+    local tmp="$d/steamcmd.tar.gz"
+    local url="https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
+    wget -4 --tries=5 --timeout=30 -qO "$tmp" "$url" 2>&1 \
+        || { rm -f "$tmp"; error "failed to download steamcmd from $url (check DNS/internet)"; }
+    ( cd "$d" && tar -xzf "$tmp" && rm "$tmp" ) \
+        || { rm -rf "$d"; error "failed to extract steamcmd"; }
     mkdir -p "$server/steamapps"
 }
 
@@ -47,7 +46,6 @@ steamclient_setup() {
     local arch
     for arch in 32 64; do
         local dst="$HOME/.steam/sdk${arch}/steamclient.so"
-        [ -f "$dst" ] && continue
         mkdir -p "$(dirname "$dst")"
         cp -f "/tmp/steamcmd/linux${arch}/steamclient.so" "$dst"
     done
