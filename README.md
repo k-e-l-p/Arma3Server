@@ -15,6 +15,13 @@ STEAM_USER=your_steam_username
 STEAM_PASSWORD=your_steam_password
 ```
 
+The Arma 3 dedicated server (App ID 233780) is free but must be on the account. If you've never downloaded it
+before, run this once on the host to claim the license:
+
+```
+steamcmd +login your_steam_username your_steam_password +app_license_request 233780 +quit
+```
+
 Then, build the image and run it:
 ```sh
 podman build -t arma3server .

@@ -31,10 +31,12 @@ steamcmd_init() {
 
 steamcmd_update() {
     steamcmd_init
-    local -a a=( +force_install_dir "$server" +login "$steam_user" "$steam_pass" +app_update 233780 )
+    local validate=""
+    [ "${1:-}" = validate ] && { validate=validate; shift; }
+    local -a a=( +force_install_dir "$server" +login "$steam_user" "$steam_pass" )
     [ -n "${STEAM_BRANCH:-}" ] && a+=(-beta "$STEAM_BRANCH")
     [ -n "${STEAM_BRANCH_PASSWORD:-}" ] && a+=(-betapassword "$STEAM_BRANCH_PASSWORD")
-    a+=("$@")
+    a+=( +app_update 1391110 $validate +app_update 233780 $validate +quit )
     /tmp/steamcmd/steamcmd.sh "${a[@]}"
 }
 
@@ -82,7 +84,7 @@ install_preset_mods() {
     ids=$(sed -nE 's,.*filedetails/\?id=([0-9]+).*,\1,p' "$html" | sort -u)
     [ -n "$ids" ] || { warn "no workshop IDs in preset"; return 0; }
     echo "[preset] IDs: $ids"
-    for id in $ids; do workshop_download "$id"; done
+    for id in $ids; do workshop_download "$id" || true; done
 }
 
 symlink_workshop_mods() {
@@ -259,14 +261,14 @@ do_start() {
 
 case "${1:-}" in
     update)
-        do_update +quit ;;
+        do_update ;;
     update_validate)
-        do_update validate +quit ;;
+        do_update validate ;;
     start)
         do_start ;;
     *)
         if [ "${SKIP_INSTALL:-false}" != true ]; then
-            do_update validate +quit
+            do_update validate
         fi
         do_start ;;
 esac
