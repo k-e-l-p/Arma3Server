@@ -23,7 +23,9 @@ check_creds() {
 }
 
 steamcmd_ensure() {
-    [ -x "$STEAMCMD_DIR/steamcmd.sh" ] && return 0
+    [ -x "$STEAMCMD_DIR/steamcmd.sh" ] \
+        && [ -f "$STEAMCMD_DIR/linux32/steamclient.so" ] \
+        && return 0
     mkdir -p "$STEAMCMD_DIR"
     local tmp="$STEAMCMD_DIR/steamcmd.tar.gz"
     local url="https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
@@ -32,6 +34,9 @@ steamcmd_ensure() {
     ( cd "$STEAMCMD_DIR" && tar -xzf "$tmp" && rm "$tmp" ) \
         || { rm -rf "$STEAMCMD_DIR"; error "failed to extract steamcmd"; }
     mkdir -p "$server/steamapps"
+    # Initial run fetches steamclient.so and other runtime deps
+    echo "[steamcmd] initializing..."
+    "$STEAMCMD_DIR/steamcmd.sh" +quit 2>/dev/null || true
 }
 
 steamcmd_run() {
@@ -61,11 +66,9 @@ steamcmd_update() {
 
 steamclient_setup() {
     for arch in 32 64; do
-        local src="$STEAMCMD_DIR/linux${arch}/steamclient.so"
-        [ -f "$src" ] || { rm -rf "$STEAMCMD_DIR"; steamcmd_ensure; }
         local dst="$HOME/.steam/sdk${arch}/steamclient.so"
         mkdir -p "$(dirname "$dst")"
-        cp -f "$src" "$dst"
+        cp -f "$STEAMCMD_DIR/linux${arch}/steamclient.so" "$dst"
     done
 }
 
