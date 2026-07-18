@@ -21,10 +21,7 @@ check_creds() {
 }
 
 steamcmd_ensure() {
-    [ -x "$STEAMCMD_DIR/steamcmd.sh" ] \
-        && [ -f "$STEAMCMD_DIR/linux32/steamclient.so" ] \
-        && [ -f "$STEAMCMD_DIR/linux64/steamclient.so" ] \
-        && return 0
+    [ -x "$STEAMCMD_DIR/steamcmd.sh" ] && return 0
     mkdir -p "$STEAMCMD_DIR"
     local tmp="$STEAMCMD_DIR/steamcmd.tar.gz"
     local url="https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
@@ -62,9 +59,11 @@ steamcmd_update() {
 
 steamclient_setup() {
     for arch in 32 64; do
+        local src="$STEAMCMD_DIR/linux${arch}/steamclient.so"
+        [ -f "$src" ] || { rm -rf "$STEAMCMD_DIR"; steamcmd_ensure; }
         local dst="$HOME/.steam/sdk${arch}/steamclient.so"
         mkdir -p "$(dirname "$dst")"
-        cp -f "$STEAMCMD_DIR/linux${arch}/steamclient.so" "$dst"
+        cp -f "$src" "$dst"
     done
 }
 
