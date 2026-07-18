@@ -330,6 +330,26 @@ process_mods() {
         done
 
         state_save "$new_hash" "$new_mods"
+    else
+        # Cache says installed — verify at least one mod directory exists.
+        # If files were moved or deleted, the state is stale and needs a reset.
+        local installed_ids
+        installed_ids=$(jq -r '.mods | to_entries[] | select(.value.status == "installed") | .key' "$STATE_FILE" 2>/dev/null)
+        local found=0
+        while IFS= read -r id; do
+            [ -d "$server/mods/$id" ] && { found=1; break; }
+        done <<< "$installed_ids"
+        if [ -n "$installed_ids" ] && [ "$found" -eq 0 ]; then
+            warn "state says mods are installed but none found on disk, resetting cache"
+            local fresh_mods
+            fresh_mods=$(printf '%s' "$new_ids" | jq -R '
+                [., inputs | select(length > 0)] as $ids |
+                reduce $ids[] as $id ({};
+                    .[$id] = {status: "pending", error: null}
+                )
+            ')
+            state_save "$new_hash" "$fresh_mods"
+        fi
     fi
 
     local pending_json
@@ -399,6 +419,11 @@ do_start() {
     local world="${ARMA_WORLD:-empty}"
     local limitfps="${ARMA_LIMITFPS:-50}"
     local hcs="${HEADLESS_CLIENTS:-0}"
+    local binary="${ARMA_BINARY:-./arma3server_x64}"
+
+    if [ ! -f "$server/${binary#./}" ]; then
+        warn "game binary not found: $server/${binary#./} (set SKIP_INSTALL=false to download it)"
+    fi
 
     if [ "${MODS_LOCAL:-true}" = true ]; then
         collect_mods "$server/mods" mods MODLIST
