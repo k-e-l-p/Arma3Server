@@ -32,6 +32,7 @@ EXPOSE 2306/udp
 
 STOPSIGNAL SIGINT
 
+ARG CACHEBUST=0
 COPY --chown=arma3:arma3 --chmod=755 entrypoint.sh /entrypoint.sh
 
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
