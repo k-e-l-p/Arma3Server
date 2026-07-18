@@ -445,6 +445,8 @@ do_start() {
 
 # ---- entry point -------------------------------------------------------------
 
+echo "sanity_test"
+
 case "${1:-}" in
     update)
         do_update ;;
