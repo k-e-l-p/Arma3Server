@@ -1,6 +1,8 @@
 #!/bin/bash
 set -o errexit -o pipefail
 
+set -x
+
 server="${HOME:-/arma3}/server"
 STEAMCMD_DIR="$HOME/steamcmd"
 STATE_FILE="$server/.mods_state.json"
