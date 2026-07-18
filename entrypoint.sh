@@ -21,7 +21,10 @@ check_creds() {
 }
 
 steamcmd_ensure() {
-    [ -x "$STEAMCMD_DIR/steamcmd.sh" ] && return 0
+    [ -x "$STEAMCMD_DIR/steamcmd.sh" ] \
+        && [ -f "$STEAMCMD_DIR/linux32/steamclient.so" ] \
+        && [ -f "$STEAMCMD_DIR/linux64/steamclient.so" ] \
+        && return 0
     mkdir -p "$STEAMCMD_DIR"
     local tmp="$STEAMCMD_DIR/steamcmd.tar.gz"
     local url="https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
@@ -51,7 +54,7 @@ steamcmd_update() {
     local -a args=( +force_install_dir "$server" +login "$steam_user" "$steam_pass" )
     [ -n "${STEAM_BRANCH:-}" ] && args+=(-beta "$STEAM_BRANCH")
     [ -n "${STEAM_BRANCH_PASSWORD:-}" ] && args+=(-betapassword "$STEAM_BRANCH_PASSWORD")
-    args+=( +app_update 1391110 )
+    args+=( +app_update 233780 )
     [ "$validate" = 1 ] && args+=(validate)
     args+=( +quit )
     steamcmd_run "${args[@]}"
