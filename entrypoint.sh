@@ -37,6 +37,13 @@ steamcmd_run() {
         "$STEAMCMD_DIR/steamcmd.sh" "$@"
 }
 
+# Workshop downloads run without timeout — SteamCMD resumes partial
+# downloads on retry, and large mods (e.g. CUP at 14 GB) need
+# unbounded time on slow connections.
+steamcmd_run_ws() {
+    "$STEAMCMD_DIR/steamcmd.sh" "$@"
+}
+
 steamcmd_update() {
     steamcmd_ensure
     local validate=0
@@ -76,17 +83,8 @@ workshop_download_batch() {
         cmd+=( +quit )
 
         echo "[mod] batch download attempt $attempt/5 (${#remaining[@]} mods)"
-        if steamcmd_run "${cmd[@]}"; then
+        if steamcmd_run_ws "${cmd[@]}"; then
             return 0
-        fi
-        local rc=$?
-
-        # on either timeout or signal kill (exit >= 124),
-        # fs may be incomplete - retry the full batch to let sc validate
-        if [ $rc -ge 124 ]; then
-            echo "[mod] timeout or signal ($rc), retrying full batch..."
-            sleep 5
-            continue
         fi
 
         local -a next=()
@@ -98,7 +96,6 @@ workshop_download_batch() {
             fi
         done
         remaining=("${next[@]}")
-        [ ${#remaining[@]} -gt 0 ] && sleep 5
     done
 
     [ ${#remaining[@]} -eq 0 ] && return 0
