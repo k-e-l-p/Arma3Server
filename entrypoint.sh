@@ -2,6 +2,8 @@
 set -o errexit -o pipefail
 
 server="${HOME:-/arma3}/server"
+STEAMCMD_DIR="$HOME/steamcmd"
+STATE_FILE="$server/.mods_state.json"
 
 error() { echo >&2 "[arma3] ERROR: $*"; exit 1; }
 warn()  { echo >&2 "[arma3] WARN: $*"; }
@@ -16,21 +18,24 @@ check_creds() {
     error "Set STEAM_USER and STEAM_PASSWORD"
 }
 
-steamcmd_init() {
-    local d=/tmp/steamcmd
-    rm -rf "$d"
-    mkdir -p "$d"
-    local tmp="$d/steamcmd.tar.gz"
+steamcmd_ensure() {
+    [ -x "$STEAMCMD_DIR/steamcmd.sh" ] && return 0
+    mkdir -p "$STEAMCMD_DIR"
+    local tmp="$STEAMCMD_DIR/steamcmd.tar.gz"
     local url="https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
     wget -4 --tries=5 --timeout=30 -qO "$tmp" "$url" 2>&1 \
         || { rm -f "$tmp"; error "failed to download steamcmd from $url (check DNS/internet)"; }
-    ( cd "$d" && tar -xzf "$tmp" && rm "$tmp" ) \
-        || { rm -rf "$d"; error "failed to extract steamcmd"; }
+    ( cd "$STEAMCMD_DIR" && tar -xzf "$tmp" && rm "$tmp" ) \
+        || { rm -rf "$STEAMCMD_DIR"; error "failed to extract steamcmd"; }
     mkdir -p "$server/steamapps"
 }
 
+steamcmd_run() {
+    "$STEAMCMD_DIR/steamcmd.sh" "$@"
+}
+
 steamcmd_update() {
-    steamcmd_init
+    steamcmd_ensure
     local validate=""
     [ "${1:-}" = validate ] && { validate=validate; shift; }
     local -a a=( +force_install_dir "$server" +login "$steam_user" "$steam_pass" )
@@ -39,73 +44,100 @@ steamcmd_update() {
     a+=( +app_update 1391110 )
     [ -n "$validate" ] && a+=(validate)
     a+=( +quit )
-    /tmp/steamcmd/steamcmd.sh "${a[@]}"
+    steamcmd_run "${a[@]}"
 }
 
 steamclient_setup() {
-    local arch
     for arch in 32 64; do
         local dst="$HOME/.steam/sdk${arch}/steamclient.so"
         mkdir -p "$(dirname "$dst")"
-        cp -f "/tmp/steamcmd/linux${arch}/steamclient.so" "$dst"
+        cp -f "$STEAMCMD_DIR/linux${arch}/steamclient.so" "$dst"
     done
 }
 
-# ---- mod download ------------------------------------------------------------
+# ---- workshop mod download ---------------------------------------------------
 
-workshop_download_all() {
-    local ids="$1"
-    [ -n "$ids" ] || return 0
-    steamcmd_init
-    local -a a=( +login "$steam_user" "$steam_pass" )
-    for id in $ids; do
-        a+=( +workshop_download_item 107410 "$id" )
+workshop_download_batch() {
+    local -a ids=("$@")
+    [ ${#ids[@]} -eq 0 ] && return 0
+
+    local -a cmd=( +force_install_dir "$server" +login "$steam_user" "$steam_pass" )
+    for id in "${ids[@]}"; do
+        cmd+=( +workshop_download_item 107410 "$id" )
     done
-    a+=( +quit )
+    cmd+=( +quit )
 
     local attempt=0
     while (( attempt < 5 )); do
         (( attempt++ ))
-        echo "[mod] batch attempt $attempt/5 (${ids})"
-        /tmp/steamcmd/steamcmd.sh "${a[@]}" && return 0
+        echo "[mod] batch download attempt $attempt/5 (${#ids[@]} mods)"
+        steamcmd_run "${cmd[@]}" && return 0
         echo "[mod] batch retrying..."
+        sleep 5
     done
-    warn "mod batch failed after 5 attempts"
+    warn "[mod] batch download failed after 5 attempts"
     return 1
 }
 
-install_preset_mods() {
-    [ -n "${MODS_PRESET:-}" ] || return 0
-    echo "=== preset mods: $MODS_PRESET ==="
-    local html=""
-    case "$MODS_PRESET" in
-        http://*|https://*)
-            html=/tmp/arma3_preset.html
-            wget -qO "$html" "$MODS_PRESET" || { warn "failed to fetch $MODS_PRESET"; return 0; } ;;
-        *)
-            html="$server/presets/$MODS_PRESET"
-            [ -f "$html" ] || { warn "preset not found: $html"; return 0; } ;;
-    esac
+# ---- state file --------------------------------------------------------------
 
-    local ids
-    ids=$(sed -nE 's,.*filedetails/\?id=([0-9]+).*,\1,p' "$html" | sort -u)
-    [ -n "$ids" ] || { warn "no workshop IDs in preset"; return 0; }
-    echo "[preset] IDs: $ids"
-    workshop_download_all "$ids" || true
+state_init() {
+    if [ ! -f "$STATE_FILE" ]; then
+        local tmp="${STATE_FILE}.tmp.$$"
+        echo '{"version":1,"preset_hash":"","mods":{}}' > "$tmp" \
+            && mv "$tmp" "$STATE_FILE"
+    fi
 }
 
-symlink_workshop_mods() {
-    local ws="$server/Steam/steamapps/workshop/content/107410"
-    local mods="$server/mods"
-    [ -d "$ws" ] || return 0
-    mkdir -p "$mods"
-    for d in "$ws"/*/; do
-        [ -d "$d" ] || continue
-        local id
-        id=$(basename "$d")
-        [ -e "$mods/$id" ] && continue
-        ln -s "../Steam/steamapps/workshop/content/107410/$id" "$mods/$id"
-    done
+state_get_hash() {
+    jq -r '.preset_hash // ""' "$STATE_FILE" 2>/dev/null || echo ""
+}
+
+state_save() {
+    local hash="$1"
+    local mods_json="$2"
+    local tmp="${STATE_FILE}.tmp.$$"
+    jq -n --arg h "$hash" --argjson m "$mods_json" '{version:1,preset_hash:$h,mods:$m}' > "$tmp" \
+        && mv "$tmp" "$STATE_FILE"
+}
+
+# ---- preset parsing ----------------------------------------------------------
+
+get_preset_ids() {
+    printf '%s' "$1" | sed -nE 's,.*filedetails/\?id=([0-9]+).*,\1,p' | sort -u
+}
+
+compute_preset_hash() {
+    printf '%s' "$1" | sha256sum | cut -d' ' -f1
+}
+
+read_preset_content() {
+    local content=""
+    case "$MODS_PRESET" in
+        http://*|https://*)
+            content=$(wget -4 --tries=3 --timeout=30 -qO- "$MODS_PRESET" 2>/dev/null) || { warn "failed to fetch $MODS_PRESET"; return 1; } ;;
+        *)
+            local f="$server/presets/$MODS_PRESET"
+            [ -f "$f" ] || { warn "preset not found: $f"; return 1; }
+            content=$(cat "$f") ;;
+    esac
+    printf '%s' "$content"
+}
+
+# ---- mod installation --------------------------------------------------------
+
+install_mod() {
+    local id="$1"
+    local src="$server/steamapps/workshop/content/107410/$id"
+    local dst="$server/mods/$id"
+
+    [ -d "$src" ] || return 1
+    [ -d "$dst" ] && rm -rf "$dst"
+    mkdir -p "$server/mods"
+
+    echo "[mod:$id] installing..."
+    cp -r "$src" "$dst" || { warn "[mod:$id] copy failed"; rm -rf "$dst"; return 1; }
+    return 0
 }
 
 # ---- mod patching / keys -----------------------------------------------------
@@ -114,8 +146,7 @@ patch_mods() {
     local d="$server/mods"
     [ -d "$d" ] || return 0
 
-    # lowercase all files, depth-first so parent dirs resolve after children
-    find -L "$d" -depth -print0 2>/dev/null | while IFS= read -r -d '' f; do
+    find "$d" -depth -print0 2>/dev/null | while IFS= read -r -d '' f; do
         base=$(basename "$f")
         lower=$(echo "$base" | tr '[:upper:]' '[:lower:]')
         [ "$base" = "$lower" ] && continue
@@ -136,7 +167,7 @@ extract_keys() {
     mkdir -p "$server/keys"
     for src in "$server/mods" "$server/servermods"; do
         [ -d "$src" ] || continue
-        find -L "$src" -name '*.bikey' -exec cp -t "$server/keys" {} + 2>/dev/null || true
+        find "$src" -name '*.bikey' -exec cp -t "$server/keys" {} + 2>/dev/null || true
     done
 }
 
@@ -177,11 +208,10 @@ launch_hcs() {
     local template="${HEADLESS_CLIENTS_PROFILE:-\$profile-hc-\$i}"
     mkdir -p "$server/configs/profiles"
     for (( i = 0; i < count; i++ )); do
-        # expand $profile, $i, $ii placeholders in the HC profile template
         local name="$template"
         name=${name//\$profile/${ARMA_PROFILE:-main}}
-        name=${name//\$i/$i}
         name=${name//\$ii/$((i+1))}
+        name=${name//\$i/$i}
         local -a hc=( "$hc_binary" -client -connect=127.0.0.1 -port="${PORT:-2302}"
                       -name="$name" -profiles="$server/configs/profiles" )
         [ -n "${MODLIST:-}" ] && hc+=(-mod="$MODLIST")
@@ -192,17 +222,121 @@ launch_hcs() {
     done
 }
 
+# ---- mod orchestration -------------------------------------------------------
+
+process_mods() {
+    [ -n "${MODS_PRESET:-}" ] || return 0
+    steamcmd_ensure
+
+    local preset_content
+    preset_content=$(read_preset_content) || return 0
+
+    local new_hash
+    new_hash=$(compute_preset_hash "$preset_content")
+
+    local new_ids
+    new_ids=$(get_preset_ids "$preset_content")
+    [ -n "$new_ids" ] || { warn "no workshop IDs in preset"; return 0; }
+
+    state_init
+    local old_hash
+    old_hash=$(state_get_hash)
+
+    jq empty "$STATE_FILE" 2>/dev/null || {
+        warn "state file corrupt, resetting"
+        local tmp="${STATE_FILE}.tmp.$$"
+        echo '{"version":1,"preset_hash":"","mods":{}}' > "$tmp" \
+            && mv "$tmp" "$STATE_FILE"
+        old_hash=""
+    }
+
+    # Reset failed mods to pending so they retry on restart
+    local has_failed
+    has_failed=$(jq '[.mods[] | select(.status == "failed")] | length > 0' "$STATE_FILE" 2>/dev/null || echo false)
+    if [ "$has_failed" = true ]; then
+        echo "[mod] retrying previously failed mods..."
+        local retry_json
+        retry_json=$(jq '.mods | with_entries(if .value.status == "failed" then .value.status = "pending" else . end)' "$STATE_FILE")
+        state_save "$old_hash" "$retry_json"
+    fi
+
+    echo "=== preset: $MODS_PRESET ==="
+
+    if [ "$new_hash" != "$old_hash" ]; then
+        echo "[mod] preset changed, updating..."
+
+        local new_mods
+        new_mods=$(printf '%s' "$new_ids" | jq -R '
+            [., inputs | select(length > 0)] as $ids |
+            reduce $ids[] as $id ({};
+                .[$id] = {status: "pending", error: null}
+            )
+        ')
+
+        jq -r --argjson keep "$new_mods" '.mods | keys[] | select($keep[.] == null)' "$STATE_FILE" 2>/dev/null | \
+        while IFS= read -r id; do
+            [ -n "$id" ] && { echo "[mod:$id] removing..."; rm -rf "$server/mods/$id" 2>/dev/null || true; }
+        done
+
+        state_save "$new_hash" "$new_mods"
+    fi
+
+    local pending_json
+    pending_json=$(jq '.mods | to_entries | map(select(.value.status == "pending")) | map(.key)' "$STATE_FILE")
+    local pending_count
+    pending_count=$(echo "$pending_json" | jq 'length')
+
+    if [ "$pending_count" -eq 0 ] 2>/dev/null; then
+        return 0
+    fi
+
+    local -a pending_arr
+    while IFS= read -r id; do
+        [ -n "$id" ] && pending_arr+=("$id")
+    done < <(echo "$pending_json" | jq -r '.[]')
+
+    echo "[mod] processing $pending_count pending mods..."
+
+    workshop_download_batch "${pending_arr[@]}" || true
+
+    local current_mods
+    current_mods=$(jq '.mods' "$STATE_FILE")
+
+    for id in "${pending_arr[@]}"; do
+        if [ -d "$server/steamapps/workshop/content/107410/$id" ]; then
+            if install_mod "$id"; then
+                current_mods=$(echo "$current_mods" | jq --arg id "$id" '.[$id] = {status:"installed",error:null}')
+            else
+                current_mods=$(echo "$current_mods" | jq --arg id "$id" '.[$id] = {status:"failed",error:"copy failed"}')
+            fi
+        else
+            current_mods=$(echo "$current_mods" | jq --arg id "$id" '.[$id] = {status:"failed",error:"download failed"}')
+        fi
+    done
+
+    patch_mods
+
+    state_save "$new_hash" "$current_mods"
+
+    local failed_count
+    failed_count=$(echo "$current_mods" | jq '[.[] | select(.status == "failed")] | length')
+    if [ "$failed_count" -gt 0 ] 2>/dev/null; then
+        warn "$failed_count mod(s) failed to install, server will start without them"
+    fi
+}
+
 # ---- update / start ----------------------------------------------------------
 
 do_update() {
     check_creds
     steamcmd_update "$@"
-    install_preset_mods
-    symlink_workshop_mods
+    process_mods
     steamclient_setup
 }
 
 do_start() {
+    steamcmd_ensure
+    steamclient_setup
     patch_mods
     keys_init
     extract_keys
@@ -249,7 +383,6 @@ do_start() {
         done
     fi
 
-    # kill all child processes (server + HCs) when this script exits
     trap 'kill 0' EXIT
 
     cd "$server"

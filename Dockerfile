@@ -13,6 +13,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
         ca-certificates \
         tar \
         xz-utils \
+        jq \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
     && mkdir -p /arma3/server /arma3/server/presets \
